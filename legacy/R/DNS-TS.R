@@ -2,16 +2,15 @@
 # werleycordeiro@gmail.com
 
 # Packages
-list.of.packages <- c("highfrequency","vars","YieldCurve")
+list.of.packages <- c("xts","vars","YieldCurve")
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 
 library(YieldCurve)
 library(vars)
-library(highfrequency)
 
 # Data
-data <-read.csv("https://www.dropbox.com/s/inpnlugzkddp42q/bonds.csv?dl=1",header = TRUE, sep = ";")
+data <-read.csv("../../data/bonds.csv",header = TRUE, sep = ";")
 require(xts)
 data <- as.matrix(data[,which(names(data)=="M3"):which(names(data)=="M120")])
 datas <- seq(as.Date("1972/1/1"), by = "month", length.out = 348)
