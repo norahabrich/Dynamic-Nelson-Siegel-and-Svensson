@@ -2,21 +2,17 @@
 
     python compare_r_python.py
 
-Writes results/r_vs_python.md (the table in the README) and figures/r_vs_python.png.
+Writes results/r_vs_python.md, the table shown in the README.
 """
 
 import json
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent
 PY, R = ROOT / "results", ROOT / "results" / "r"
-ACCENT, GREY, INK2 = "#2a78d6", "#8a8984", "#52514e"
 
 
 def maxdiff(a, b):
@@ -40,10 +36,10 @@ def main():
     f_r = pd.read_csv(R / "two_step_factors.csv", index_col=0)
     add("Two-step factors, 348 months × 3", "", "", maxdiff(f_py, f_r), "%")
     fit_py = pd.read_csv(PY / "in_sample_rmse_bp.csv", index_col=0)
-    fit_r = pd.read_csv(R / "in_sample_rmse_bp.csv", index_col=0)
+    fit_r = pd.read_csv(R / "in_sample_rmse_bp.csv", index_col=0).round(2)  # Python tables are saved to 0.01 bp
     for col in ["Nelson-Siegel (two-step)", "Svensson (two-step)", "Nelson-Siegel (Kalman)"]:
         p, q = np.sqrt((fit_py[col] ** 2).mean()), np.sqrt((fit_r[col] ** 2).mean())
-        add(f"In-sample RMSE, {col}", f"{p:.3f}", f"{q:.3f}", maxdiff(fit_py[col], fit_r[col]), "bp")
+        add(f"In-sample RMSE, {col}", f"{p:.2f}", f"{q:.2f}", maxdiff(fit_py[col], fit_r[col]), "bp")
 
     # Kalman estimates
     k_py, k_r = json.load(open(PY / "kalman_params.json")), json.load(open(R / "kalman_params.json"))
@@ -60,7 +56,7 @@ def main():
     o_py = pd.read_csv(PY / "oos_rmse_bp.csv", index_col=[0, 1])
     o_r = pd.read_csv(R / "oos_rmse_bp.csv", index_col=[0, 1])
     o_r.columns = o_py.columns
-    o_r = o_r.loc[o_py.index]
+    o_r = o_r.loc[o_py.index].round(2)  # same 0.01 bp precision as the Python table
     kal = o_py.index.get_level_values(0).str.contains("Kalman")
     add("Out-of-sample RMSE, 5 two-step models and benchmarks (255 values)", "", "",
         maxdiff(o_py[~kal], o_r[~kal]), "bp")
@@ -79,30 +75,13 @@ def main():
     add("Runtime, one Kalman estimation", f"{t_py['kalman_fit_seconds']:.0f} s", f"{t_r['kalman_fit_seconds']:.0f} s", None)
     add("Runtime, full pipeline", f"{t_py['total_seconds'] / 60:.1f} min", f"{t_r['total_seconds'] / 60:.1f} min", None)
 
-    lines = [f"Python {t_py['python_version']} (NumPy, SciPy) vs {t_r['r_version']} (base R only), same data and settings.", "",
+    lines = [f"Python {t_py['python_version']} (NumPy, SciPy) vs {t_r['r_version']} (base R only), same data and settings. RMSE tables are compared at their saved precision of 0.01 bp.", "",
              "| Quantity | Python | R | Largest absolute difference |", "|---|---:|---:|---:|"]
     for what, p, r, diff, unit in rows:
         d = "" if diff is None else (f"{diff}" if isinstance(diff, int) else fmt(diff))
         lines.append(f"| {what} | {p} | {r} | {d} {unit if diff is not None else ''}".rstrip() + " |")
     (PY / "r_vs_python.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
-
-    # Figure: every out-of-sample RMSE, R against Python
-    fig, ax = plt.subplots(figsize=(5.5, 5.5))
-    lo, hi = 10, max(o_py.values.max(), o_r.values.max()) * 1.05
-    ax.plot([lo, hi], [lo, hi], color=GREY, lw=1, ls="--")
-    ax.scatter(o_py[~kal].values.ravel(), o_r[~kal].values.ravel(), s=14, color=GREY, alpha=0.7,
-               label="Two-step models and benchmarks")
-    if kal.any():
-        ax.scatter(o_py[kal].values.ravel(), o_r[kal].values.ravel(), s=18, color=ACCENT, label="Kalman model")
-    ax.set_xlabel("Python, out-of-sample RMSE (bp)")
-    ax.set_ylabel("R, out-of-sample RMSE (bp)")
-    ax.set_title("R and Python give the same forecast errors", loc="left", fontweight="bold")
-    ax.legend(frameon=False, fontsize=8, loc="upper left")
-    for s in ["top", "right"]:
-        ax.spines[s].set_visible(False)
-    ax.grid(color="#ecebe8")
-    fig.savefig(ROOT / "figures" / "r_vs_python.png", dpi=150, bbox_inches="tight")
 
 
 if __name__ == "__main__":
