@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/norahabrich/Dynamic-Nelson-Siegel-and-Svensson/actions/workflows/ci.yml/badge.svg)](https://github.com/norahabrich/Dynamic-Nelson-Siegel-and-Svensson/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
+![R](https://img.shields.io/badge/R-base%20only-276DC3)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **Result:** forecasting 6 months ahead, the two-step Dynamic Nelson-Siegel model cuts the forecast error on the 3-month yield by **26%** compared with the random walk (RMSE 44 bp vs 60 bp, 1994-1999). At 12 months, the Kalman-filter version is the most accurate model on every maturity from 15 months to 10 years.
@@ -121,13 +122,69 @@ conventional 0.0609 is on a flat part of the curve, so the choice matters little
 - The model does not impose absence of arbitrage (see the arbitrage-free Nelson-Siegel of
   Christensen, Diebold & Rudebusch, 2011).
 
+## R and Python: do they give the same results?
+
+The whole pipeline is written twice: in Python ([`dnsmodel/`](dnsmodel), NumPy and SciPy) and in
+base R ([`R/dnsmodel.R`](R/dnsmodel.R), no package needed). Both read the same data, use the same
+settings and save their results in the same format, and
+[`compare_r_python.py`](compare_r_python.py) compares them number by number.
+
+**Short answer: same results, same conclusions.** The two-step models agree to machine precision,
+the Kalman model agrees to within 0.21 bp of forecast error, and not one of the 255 significance
+tests changes its verdict. R takes about twice as long.
+
+Python 3.13.18 (NumPy, SciPy) vs R version 4.3.3 (2024-02-29) (base R only), same data and settings. RMSE tables are compared at their saved precision of 0.01 bp.
+
+| Quantity | Python | R | Largest absolute difference |
+|---|---:|---:|---:|
+| Two-step factors, 348 months × 3 |  |  | 6.4e-14 % |
+| In-sample RMSE, Nelson-Siegel (two-step) | 10.44 | 10.44 | 0 bp |
+| In-sample RMSE, Svensson (two-step) | 8.40 | 8.40 | 0 bp |
+| In-sample RMSE, Nelson-Siegel (Kalman) | 11.15 | 11.16 | 1.0e-02 bp |
+| Kalman λ | 0.07777 | 0.07776 | 4.7e-06 |
+| Kalman log-likelihood | 3184.552 | 3184.551 | 1.0e-03 |
+| Kalman transition matrix A (9 values) |  |  | 7.2e-05 |
+| Kalman factor means μ |  |  | 0.04 % |
+| Kalman measurement error sd (17 values) |  |  | 4.4e-03 bp |
+| Kalman filtered factors, 348 months × 3 |  |  | 7.8e-04 % |
+| Out-of-sample RMSE, 5 two-step models and benchmarks (255 values) |  |  | 0 bp |
+| Out-of-sample RMSE, Kalman model (51 values) |  |  | 0.21 bp |
+| Diebold-Mariano tests with a different 5% verdict |  |  | 0 of 255 |
+| Runtime, one Kalman estimation | 102 s | 276 s | |
+| Runtime, full pipeline | 8.6 min | 18.8 min | |
+
+Why the small differences, and where they come from:
+
+- **Two-step models: identical.** Each step is an ordinary least-squares regression with an exact
+  solution, so both languages compute the same numbers; the factors differ by about 10⁻¹⁴, which is
+  floating-point rounding.
+- **Kalman model: equal up to the optimiser.** The likelihood is the same function in both languages
+  (same value at the same parameters), but it has to be maximised numerically over 36 parameters.
+  SciPy and R both use the L-BFGS-B algorithm, with different implementations and stopping rules,
+  so they stop at two points that are a hair apart on a very flat surface (log-likelihood within
+  0.001, λ within 0.00001).
+- **The level mean is the least precise parameter** (0.04 percentage points apart): the level factor
+  is very persistent (autoregressive coefficient 0.994), so its long-run mean is weakly identified
+  by 29 years of data. This does not affect the forecasts in any meaningful way.
+- **Out-of-sample, the gaps add up a little** because the Kalman model is re-estimated 6 times, each
+  time starting from the previous estimate; the largest gap is 0.21 bp of RMSE, against Kalman
+  forecast errors of 19 to 96 bp.
+- **Speed.** One likelihood evaluation is actually slightly faster in R (14 ms vs 18 ms here), but R's
+  `optim` computes numerical gradients with central differences (two evaluations per parameter) and
+  needed 18,615 evaluations against 6,290 for SciPy, which uses one-sided differences. Hence about
+  2.7 times longer per estimation. Supplying an analytical gradient would speed up both.
+
 ## Reproduce
 
 ```bash
 pip install -r requirements.txt
-python run_all.py          # every table and figure, about 10 minutes
+python run_all.py          # every table and figure, about 9 minutes
 python run_all.py --fast   # without the Kalman backtest, under 2 minutes
 pytest -q                  # unit tests
+
+Rscript run_all.R          # same pipeline in base R, about 20 minutes (results/r/)
+Rscript tests/test_dnsmodel.R
+python compare_r_python.py # R vs Python table above
 ```
 
 A short guided tour is in [`notebooks/demo.ipynb`](notebooks/demo.ipynb).
@@ -139,8 +196,11 @@ dnsmodel/        Python package
   kalman.py      state-space DNS, Kalman filter and maximum likelihood
   backtest.py    expanding-window backtest, RMSE, Diebold-Mariano test
 run_all.py       reproduces results/ and figures/
-results/         RMSE tables, Diebold-Mariano tests, Kalman parameters
-tests/           unit tests (run by GitHub Actions)
+R/dnsmodel.R     the same models in base R
+run_all.R        reproduces results/r/ in R
+compare_r_python.py  compares results/ and results/r/
+results/         RMSE tables, Diebold-Mariano tests, Kalman parameters (R outputs in results/r/)
+tests/           unit tests in Python and in R (run by GitHub Actions)
 legacy/R/        original R code by Werley Cordeiro
 ```
 
@@ -149,8 +209,8 @@ legacy/R/        original R code by Werley Cordeiro
 This project started from the R implementation of the two-step DNS and DNSS models by
 [Werley Cordeiro](https://github.com/werleycordeiro), kept in [`legacy/R`](legacy/R) with his
 derivation of the Nelson-Siegel equations ([`docs/Nelson_Siegel_Math.pdf`](docs/Nelson_Siegel_Math.pdf)).
-The Python package, the Kalman filter estimation, the out-of-sample backtest, the tests and the
-figures were added on top of it.
+The Python package, the new base-R implementation, the Kalman filter estimation, the
+out-of-sample backtest, the R vs Python comparison, the tests and the figures were added on top of it.
 
 - Nelson, C. R. & Siegel, A. F. (1987). Parsimonious modeling of yield curves. *Journal of Business*, 60(4).
 - Svensson, L. E. O. (1994). Estimating and interpreting forward interest rates: Sweden 1992-1994. NBER Working Paper 4871.
