@@ -8,6 +8,8 @@ Outputs go to results/ (CSV, JSON, Markdown tables) and figures/ (PNG).
 
 import argparse
 import json
+import platform
+import time
 from pathlib import Path
 
 import matplotlib
@@ -137,6 +139,8 @@ def fig_ratio(rm):
 
 
 def main(fast: bool):
+    global T_START
+    T_START = time.perf_counter()
     FIG.mkdir(exist_ok=True)
     RES.mkdir(exist_ok=True)
     y = load_yields()
@@ -144,18 +148,26 @@ def main(fast: bool):
 
     # ---- In-sample fit -------------------------------------------------------
     fits = in_sample(y)
+    t0 = time.perf_counter()
     kalman = KalmanDNS(MATURITIES).fit(Y)
+    kalman_seconds = time.perf_counter() - t0
     kp = kalman.params
     kz = nelson_siegel_loadings(kp["lambda"], MATURITIES)
-    k_fitted = kalman.filtered_factors() @ kz.T
+    k_states = kalman.filtered_factors()
+    k_fitted = k_states @ kz.T
+    cols = ["level", "slope", "curvature"]
+    pd.DataFrame(fits["Nelson-Siegel"]["betas"], index=y.index.strftime("%Y-%m-%d"), columns=cols).rename_axis("date") \
+        .to_csv(RES / "two_step_factors.csv")
+    pd.DataFrame(k_states, index=y.index.strftime("%Y-%m-%d"), columns=cols).rename_axis("date") \
+        .to_csv(RES / "kalman_factors.csv")
     fit_tbl = pd.DataFrame({
         "Nelson-Siegel (two-step)": rmse(Y - fits["Nelson-Siegel"]["fitted"]) * 100,
         "Svensson (two-step)": rmse(Y - fits["Svensson"]["fitted"]) * 100,
         "Nelson-Siegel (Kalman)": rmse(Y - k_fitted) * 100,
     }, index=pd.Index(MATURITIES.astype(int), name="maturity_months"))
     fit_tbl.round(2).to_csv(RES / "in_sample_rmse_bp.csv")
-    json.dump({"lambda": kp["lambda"], "mu": kp["mu"].tolist(), "A": kp["A"].round(4).tolist(),
-               "Q": kp["Q"].round(5).tolist(), "measurement_sd_bp": (kp["meas_sd"] * 100).round(2).tolist(),
+    json.dump({"lambda": kp["lambda"], "mu": kp["mu"].tolist(), "A": kp["A"].tolist(),
+               "Q": kp["Q"].round(5).tolist(), "measurement_sd_bp": (kp["meas_sd"] * 100).tolist(),
                "loglik": kalman.loglik_}, open(RES / "kalman_params.json", "w"), indent=2)
 
     fig_curves(y, fits)
@@ -177,7 +189,9 @@ def main(fast: bool):
     if not fast:
         models["DNS Kalman (VAR1)"] = KalmanDNS(MATURITIES)
         refit["DNS Kalman (VAR1)"] = 12  # parameters re-estimated every 12 months
+    t1 = time.perf_counter()
     errors = expanding_window_errors(Y, models, HORIZONS, first, refit)
+    backtest_seconds = time.perf_counter() - t1
     n_origins = len(next(iter(errors.values()))[1])
     rows, dm_rows = [], []
     for name, eh in errors.items():
@@ -219,6 +233,9 @@ def main(fast: bool):
     for col in fit_tbl.columns:
         allm = np.sqrt((fit_tbl[col] ** 2).mean())
         lines.append(f"| {col} | " + " | ".join(f"{fit_tbl.loc[m, col]:.1f}" for m in SHOW) + f" | {allm:.1f} |")
+    json.dump({"total_seconds": round(time.perf_counter() - T_START, 1), "kalman_fit_seconds": round(kalman_seconds, 1),
+               "backtest_seconds": round(backtest_seconds, 1), "fast": fast, "python_version": platform.python_version()},
+              open(RES / "runtime.json", "w"))
     (RES / "summary.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
     print(f"\nKalman lambda = {kp['lambda']:.4f}")
