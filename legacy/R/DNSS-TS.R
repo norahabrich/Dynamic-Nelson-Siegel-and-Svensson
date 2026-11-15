@@ -2,16 +2,15 @@
 # werleycordeiro@gmail.com
 
 # Packages
-list.of.packages <- c("highfrequency","vars","YieldCurve")
+list.of.packages <- c("xts","vars","YieldCurve")
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 
 library(YieldCurve)
 library(vars)
-library(highfrequency)
 
 # Data
-data <-read.csv("https://www.dropbox.com/s/inpnlugzkddp42q/bonds.csv?dl=1",header = TRUE, sep = ";")
+data <-read.csv("../../data/bonds.csv",header = TRUE, sep = ";")
 require(xts)
 data <- as.matrix(data[,which(names(data)=="M3"):which(names(data)=="M120")])
 datas <- seq(as.Date("1972/1/1"), by = "month", length.out = 348)
@@ -32,13 +31,13 @@ Z <- Svensson.factor.loadings(lambda1=lambda1,lambda2=lambda2,maturity=maturity)
 
 # Betas and Yhat function
 source("Yhat.betas.R")
-results <- Yhat.betas(Y=data) 
+results <- Yhat.betas(Y=data,Z=Z) 
 head(results$beta)
 head(results$Yhat)
 
 # VAR(1) coeffient matrix 
 source("VARcoeff.R")
-var<-VARcoeff(betas=results$beta) # Start point to pars$phi 
+var<-VARcoeff(betas=results$beta,l=l) # Start point to pars$phi 
 
 # It fits data 348. Obs.: I calculate the VAR coefficients matrix to the whole sample so that 
 # I can use for forecasts in observation 349, for example.
